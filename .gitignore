@@ -1,0 +1,33 @@
+.gradle/
+.kotlin/
+.idea/
+build/
+app/build/
+local.properties
+*.iml
+*.apk
+*.aab
+*.log
+*.hprof
+
+# Local development and generated enrollment artifacts
+provisioning.json
+provisioning-qr.png
+__pycache__/
+venv/
+.venv/
+.DS_Store
+
+# Secrets and machine-specific credentials
+admin_pin.txt
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+*.key
+.env
+.env.*
+.aws/
+.codex/
+.agents/
