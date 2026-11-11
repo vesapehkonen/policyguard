@@ -1,0 +1,38 @@
+1. Updating version numbers
+  Update version numbers to ./app/build.gradle.kts
+    versionCode = 
+    versionName = 
+
+2. Build APK
+  export ANDROID_HOME="$HOME/Android/Sdk"
+  export ANDROID_SDK_ROOT="$ANDROID_HOME"
+  ./gradlew assembleEnrollment
+
+3A. Update an existing installation
+  ~/Android/Sdk/platform-tools/adb install -r app/build/outputs/apk/enrollment/app-enrollment.apk
+
+4B. Fresh installation after factory reset
+
+  Generate provisioning QR code:
+
+    python3 -m venv venv
+    . venv/bin/activate
+    python -m pip install -r requirements.txt
+
+    IP=$(ip -4 route get 1.1.1.1 | awk '{print $7; exit}')
+    
+    python3 generate_qr.py   app/build/outputs/apk/enrollment/app-enrollment.apk \
+    http://$IP:8000/app-enrollment.apk --png provisioning-qr.png   --json provisioning.json
+
+  Start APK webserver:
+    python3 -m http.server 8000   --directory app/build/outputs/apk/enrollment
+
+  Provision phone:
+    1. Factory-reset the phone.
+    2. At the initial welcome screen, tap six times to start QR provisioning.
+    3. Connect the phone to the same Wi-Fi network as the computer.
+    4. Scan provisioning-qr.png.
+    5. Follow Android's provisioning instructions.
+
+5. Signing key
+  The signing key is ~/.android/debug.keystore
