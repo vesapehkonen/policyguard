@@ -12,6 +12,7 @@
     <application android:name=".GuardApplication" android:label="Device Policy Guard" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
         <receiver android:name=".SmsSentReceiver" android:exported="false" />
         <receiver android:name=".AutoSmsResultReceiver" android:exported="false" />
+        <receiver android:name=".FallbackWatchdogReceiver" android:exported="false" />
         <receiver android:name=".FallbackBootReceiver" android:exported="true">
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
             <intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>

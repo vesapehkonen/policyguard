@@ -11,6 +11,7 @@ class FallbackBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val afterUpdate = intent.action == Intent.ACTION_MY_PACKAGE_REPLACED
         if (intent.action != Intent.ACTION_BOOT_COMPLETED && !afterUpdate) return
+        DiagnosticLog.record(context, "${if (afterUpdate) "App update" else "Device boot"} receiver woke; automatic SMS enabled=${FamilyConfig.enabled(context)}")
         if (!FamilyConfig.enabled(context)) return
         val event = if (afterUpdate) "update" else "reboot"
         val p = FamilyConfig.prefs(context)
@@ -19,6 +20,7 @@ class FallbackBootReceiver : BroadcastReceiver() {
                 .putString("error", "Grant Location access 'Allow all the time' in Android app settings").apply()
             return
         }
+        FallbackWatchdogReceiver.schedule(context)
         try {
             context.startForegroundService(Intent(context, AutoFallbackService::class.java))
             p.edit().putString("service_status", "Restart requested after $event").apply()

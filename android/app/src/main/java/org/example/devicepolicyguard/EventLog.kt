@@ -9,6 +9,7 @@ import java.util.Date
 object EventLog {
     private const val NAME = "activity_history"
     @Synchronized fun record(context: Context, description: String) {
+        DiagnosticLog.record(context, description)
         val prefs = context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
         val entries = try { JSONArray(prefs.getString("events", "[]")) } catch (_: Exception) { JSONArray() }
         val next = JSONArray()

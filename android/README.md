@@ -2,7 +2,7 @@
 
 Minimal Kotlin Device Policy Controller for a Samsung Galaxy S10e (SM-G970U) on Android 12. It requests **fully managed Device Owner** provisioning, keeps the normal Samsung launcher and system apps, and applies the mobile-network, Airplane Mode, and Location policies described below. It includes manual and optional automatic family location SMS sharing. It does not use kiosk mode or Knox.
 
-The current build is **1.4.12** (`versionCode=19`, package `org.example.devicepolicyguard`). The QR and factory-reset instructions below apply only to a new, unprovisioned test device. Update an existing Device Owner installation in place using the same signing key; do not factory-reset or reprovision it for an app update.
+The current build is **1.4.14** (`versionCode=21`, package `org.example.devicepolicyguard`). The QR and factory-reset instructions below apply only to a new, unprovisioned test device. Update an existing Device Owner installation in place using the same signing key; do not factory-reset or reprovision it for an app update.
 
 ## What this experiment proves
 
@@ -149,7 +149,7 @@ The policy readbacks show Android's reported state; Samsung Quick Settings and S
 
 Version 1.4.4 introduced a PIN gate for the entire app. Its in-memory unlock expires when the app leaves the foreground or after two minutes without interaction. The current home screen shows sharing status above the manual **Send test SMS** controls; **Activity and detailed status** contains recent local events, SMS attempt results, and full Device Owner readbacks. The event history keeps only the latest 30 status entries and does not store SMS recipients or coordinates. Android's secure-window flag hides these screens from screenshots and recent-app previews. The automatic sharing service continues its opted-in work while the UI is locked, with an ongoing notification.
 
-Version 1.4.12 has `versionCode=19` and retains the application ID, Device Owner receiver, app preferences, and signing configuration. All configuration and policy controls live behind **Administrator settings**. On first use create a 6–12 digit administrator PIN; subsequent visits require it. The verifier is a salted HMAC with a key held by Android Keystore. Five failed attempts cause a one-minute lockout. Change PIN requires the current PIN.
+Version 1.4.14 has `versionCode=21` and retains the application ID, Device Owner receiver, app preferences, and signing configuration. All configuration and policy controls live behind **Administrator settings**. On first use create a 6–12 digit administrator PIN; subsequent visits require it. The verifier is a salted HMAC with a key held by Android Keystore. Five failed attempts cause a one-minute lockout. Change PIN requires the current PIN.
 
 **PIN recovery:** Store the PIN in a trusted password manager. There is no silent PIN reset or Device Owner policy bypass. If the PIN or Keystore key is lost, a trusted administrator with the original signing key and physical custody of the device must prepare and install a narrowly scoped, signed in-place maintenance update that sets a replacement PIN. Verify ownership and the signing certificate before that update, then install the normal app update. The Device Owner component and restrictions stay active throughout. Do not clear app data, uninstall, reprovision, or factory-reset as a PIN recovery step. Without the original signing key, this app cannot offer an in-place recovery path.
 
@@ -157,7 +157,17 @@ Automatic sharing is **off by default**. In Administrator settings, add 1–5 di
 
 The service pauses SMS while Android reports a validated internet connection. After losing validated internet it waits one minute for the one-minute interval, or two minutes for longer intervals, then asks GPS for a **new fix**. A null, old, or timed-out fix causes an error and **no SMS**. The app cancels a pending fix after 90 seconds; Android may end the one-shot request sooner. While offline, it attempts again no sooner than the chosen interval. Each SMS includes timestamp, accuracy, battery percentage, and a Google Maps link. If no default SMS SIM is available, the attempt fails with a visible error. Carrier send and delivery callbacks, missing permissions, SIM failures, and GPS failures appear in the diagnostic screen. Delivery reports depend on carrier support.
 
-The service is best effort: Android or Samsung may stop it, especially because of battery management. Reopening the app restarts it if enabled. The status shows connectivity, the last attempt, the last carrier-confirmed successful send, and any failure reason. The current app has **no online location upload endpoint**; validated internet only pauses SMS. Supply an endpoint and authentication format before adding online location reporting.
+The foreground service keeps sharing active after the app UI closes. A five-minute alarm checks and requests a restart if Android removes the service process; closing the app task schedules an earlier restart check. The outage start time is saved so a process restart does not reset the initial wait. Reboot and app update also request a restart. These checks are best effort: Android may delay alarms during idle or suppress the app if it is force-stopped, and Samsung battery management may still interfere. The status shows connectivity, the last attempt, the last carrier-confirmed successful send, and any failure reason. The current app has **no online location upload endpoint**; validated internet only pauses SMS. Supply an endpoint and authentication format before adding online location reporting.
+
+Version 1.4.14 writes UTC timestamped diagnostic events for service starts and stops, boot and watchdog wakes, connectivity changes, waiting reasons, GPS attempts, SMS requests, and carrier results. The current log and three rotated archives are stored under `/sdcard/Android/data/org.example.devicepolicyguard/files/` (about 4 MB total). These logs omit recipient numbers and coordinates. Pull them with ADB:
+
+```bash
+adb pull /sdcard/Android/data/org.example.devicepolicyguard/files/diagnostic.log ./diagnostic.log
+adb pull /sdcard/Android/data/org.example.devicepolicyguard/files/diagnostic.log.1 ./diagnostic.log.1
+adb logcat -d -s PolicyGuard:I
+```
+
+Older archive files end in `.2` and `.3` when present. The same events appear in Logcat for live inspection. A force-stopped app cannot log while Android prevents it from running.
 
 Version 1.4.5 makes the one-minute interval apply to the first offline attempt as well. Other intervals retain the two-minute initial wait. The home screen now names the reason automatic sharing is paused, including missing background Location, missing SMS permission, or validated internet. Grant **Allow all the time** Location access in Android app settings before expecting background or rebooted sharing.
 

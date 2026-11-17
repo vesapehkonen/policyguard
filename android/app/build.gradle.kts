@@ -21,8 +21,8 @@ android {
         applicationId = "org.example.devicepolicyguard"
         minSdk = 31
         targetSdk = 31
-        versionCode = 19
-        versionName = "1.4.12"
+        versionCode = 21
+        versionName = "1.4.14"
     }
 
     signingConfigs {

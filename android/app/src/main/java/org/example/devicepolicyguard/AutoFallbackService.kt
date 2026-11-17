@@ -78,6 +78,7 @@ class AutoFallbackService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        DiagnosticLog.record(this, "Service created; automatic SMS enabled=${FamilyConfig.enabled(this)}")
         val channel = NotificationChannel(CHANNEL, "Family policy guard",
             NotificationManager.IMPORTANCE_LOW)
         val warningChannel = NotificationChannel(WARNING_CHANNEL, "Internet connection",
@@ -87,11 +88,13 @@ class AutoFallbackService : Service() {
             createNotificationChannel(warningChannel)
         }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            DiagnosticLog.record(this, "Service cannot start: Precise Location permission missing; no SMS")
             p.edit().putString("error", "Precise Location permission missing; service not started").apply()
             stopWithoutLocation()
             return
         }
         if (checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            DiagnosticLog.record(this, "Service cannot start: Background Location permission missing; no SMS")
             p.edit().putString("error", "Background Location permission missing; service not started")
                 .putString("service_status", "Stopped: background Location permission missing").apply()
             stopWithoutLocation()
@@ -101,6 +104,7 @@ class AutoFallbackService : Service() {
             startForeground(NOTIFICATION_ID, notification(),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
         } catch (e: Exception) {
+            DiagnosticLog.record(this, "Foreground service could not start: ${e.javaClass.simpleName}: ${e.message}; no SMS")
             p.edit().putString("error", "Foreground service could not start: ${e.javaClass.simpleName}: ${e.message}")
                 .putBoolean("enabled", false).apply()
             stopWithoutLocation()
@@ -122,12 +126,15 @@ class AutoFallbackService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        DiagnosticLog.record(this, "Service start command; startId=$startId restart=${intent == null}")
         if (!FamilyConfig.enabled(this) ||
             checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED ||
             checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            DiagnosticLog.record(this, "Service stopped: sharing disabled or Location permission missing; no SMS")
             stopSelf()
             return START_NOT_STICKY
         }
+        FallbackWatchdogReceiver.schedule(this)
         if (!monitoringStarted) {
             monitoringStarted = true
             p.registerOnSharedPreferenceChangeListener(preferenceListener)
@@ -144,6 +151,7 @@ class AutoFallbackService : Service() {
     }
 
     override fun onDestroy() {
+        DiagnosticLog.record(this, "Service destroyed; automatic SMS enabled=${FamilyConfig.enabled(this)}")
         if (networkCallbackRegistered) connectivity.unregisterNetworkCallback(networkCallback)
         if (monitoringStarted) p.unregisterOnSharedPreferenceChangeListener(preferenceListener)
         handler.removeCallbacksAndMessages(null)
@@ -151,9 +159,18 @@ class AutoFallbackService : Service() {
         getSystemService(NotificationManager::class.java).cancel(WARNING_NOTIFICATION_ID)
         val detail = if (FamilyConfig.enabled(this) &&
             checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED)
-            "Stopped: background Location permission missing" else "Stopped; reopen app to restart if enabled"
+            "Stopped: background Location permission missing" else "Stopped; automatic restart scheduled if enabled"
+        if (FamilyConfig.enabled(this) &&
+            checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED)
+            FallbackWatchdogReceiver.schedule(this, 60_000L)
         status(detail)
         super.onDestroy()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        DiagnosticLog.record(this, "App task removed; service restart check scheduled")
+        if (FamilyConfig.enabled(this)) FallbackWatchdogReceiver.schedule(this, 60_000L)
+        super.onTaskRemoved(rootIntent)
     }
 
     private fun notification(): Notification {
@@ -203,10 +220,14 @@ class AutoFallbackService : Service() {
 
     private fun onNetworkChanged(internetAvailable: Boolean) {
         if (!FamilyConfig.enabled(this)) { stopSelf(); return }
+        if (lastInternetAvailable != internetAvailable)
+            DiagnosticLog.record(this, if (internetAvailable) "Validated internet available; no automatic SMS"
+                else "Validated internet unavailable; offline SMS timer active")
         updateInternetWarning(internetAvailable)
         if (internetAvailable) {
             handler.removeCallbacks(offlineTimer)
             offlineSince = 0L
+            p.edit().remove("offline_since_wall").apply()
             if (finding) {
                 finding = false
                 signal?.cancel()
@@ -219,15 +240,22 @@ class AutoFallbackService : Service() {
         }
         val now = SystemClock.elapsedRealtime()
         if (offlineSince == 0L) {
-            offlineSince = now
+            val wall = System.currentTimeMillis()
+            val saved = p.getLong("offline_since_wall", 0L)
+            val firstDelayMs = minOf(FamilyConfig.intervalMinutes(this), 2) * 60_000L
+            val elapsed = if (saved > 0L) (wall - saved).coerceIn(0L, firstDelayMs) else 0L
+            offlineSince = now - elapsed
+            if (saved == 0L) p.edit().putLong("offline_since_wall", wall).apply()
+            DiagnosticLog.record(this, "Offline wait started; restored elapsed=${elapsed / 1000}s")
             val delayMinutes = minOf(FamilyConfig.intervalMinutes(this), 2)
             status("Internet unavailable; waiting $delayMinutes minute${if (delayMinutes == 1) "" else "s"} before first attempt")
         }
         evaluateOffline()
     }
 
-    private fun scheduleOfflineCheck(delayMs: Long) {
+    private fun scheduleOfflineCheck(delayMs: Long, reason: String) {
         handler.removeCallbacks(offlineTimer)
+        DiagnosticLog.record(this, "No SMS yet: $reason; next check in ${delayMs.coerceAtLeast(1_000L) / 1000}s")
         handler.postDelayed(offlineTimer, delayMs.coerceAtLeast(1_000L))
     }
 
@@ -241,32 +269,36 @@ class AutoFallbackService : Service() {
         val now = SystemClock.elapsedRealtime()
         val firstDelayMs = minOf(FamilyConfig.intervalMinutes(this), 2) * 60_000L
         if (now - offlineSince < firstDelayMs) {
-            scheduleOfflineCheck(firstDelayMs - (now - offlineSince))
+            scheduleOfflineCheck(firstDelayMs - (now - offlineSince), "initial offline wait")
             return
         }
-        if (finding) return
+        if (finding) {
+            DiagnosticLog.record(this, "No SMS yet: waiting for fresh GPS fix")
+            return
+        }
         if (p.getBoolean("batch_pending", false)) {
             val age = System.currentTimeMillis() - p.getLong("attempt_time", 0)
             if (age < 180_000) {
-                scheduleOfflineCheck(180_000 - age)
+                scheduleOfflineCheck(180_000 - age, "waiting for carrier result")
                 return
             }
             p.edit().putBoolean("batch_pending", false)
                 .putString("send_result", "Carrier result timed out; delivery unknown").apply()
+            DiagnosticLog.record(this, "Carrier result timed out; delivery unknown")
         }
         val intervalMs = FamilyConfig.intervalMinutes(this) * 60_000L
         val wall = System.currentTimeMillis()
         // Persist the next attempt before doing any work to avoid a flood after process restart.
         val persistedNext = p.getLong("next_attempt_wall", 0)
         if (wall < persistedNext) {
-            scheduleOfflineCheck(persistedNext - wall)
+            scheduleOfflineCheck(persistedNext - wall, "configured SMS interval")
             return
         }
         val saved = p.edit().putLong("attempt_time", wall).putLong("next_attempt_wall", wall + intervalMs)
             .putString("send_result", "Obtaining fresh GPS fix").putString("error", "None").commit()
         if (!saved) {
             fail("Could not save attempt state; no SMS sent")
-            scheduleOfflineCheck(60_000)
+            scheduleOfflineCheck(60_000, "attempt state could not be saved")
             return
         }
         requestFix()
@@ -274,6 +306,7 @@ class AutoFallbackService : Service() {
     }
 
     private fun requestFix() {
+        DiagnosticLog.record(this, "Automatic SMS attempt: checking permissions, SIM recipients, and GPS")
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             fail("Precise Location permission missing; no SMS sent"); return
         }
@@ -288,6 +321,7 @@ class AutoFallbackService : Service() {
             fail("GPS/Location disabled; no SMS sent"); return
         }
         finding = true
+        DiagnosticLog.record(this, "Requesting fresh GPS fix; 90s timeout")
         status("Offline; waiting for fresh GPS fix")
         val started = SystemClock.elapsedRealtimeNanos()
         val current = CancellationSignal()
@@ -299,7 +333,7 @@ class AutoFallbackService : Service() {
                 gpsTimeout = null
                 current.cancel()
                 fail("No fresh GPS fix in 90 seconds; no SMS sent")
-                scheduleOfflineCheck(15_000)
+                scheduleOfflineCheck(15_000, "GPS timed out")
             }
         }
         gpsTimeout = timeout
@@ -323,6 +357,7 @@ class AutoFallbackService : Service() {
                     p.edit().putLong("fix_time", fix.time)
                         .putString("fix_summary", String.format(Locale.US, "%.6f, %.6f ±%.0f m",
                             fix.latitude, fix.longitude, fix.accuracy)).apply()
+                    DiagnosticLog.record(this, "Fresh GPS fix received; preparing SMS")
                     sendBatch(fix)
                 } finally {
                     if (offlineSince != 0L) evaluateOffline()
@@ -360,6 +395,7 @@ class AutoFallbackService : Service() {
 
     private fun sendBatch(fix: Location) {
         if (FallbackStatus.hasValidatedInternet(this)) {
+            DiagnosticLog.record(this, "Internet returned before SMS send; no SMS")
             status("Internet returned; SMS cancelled")
             return
         }
@@ -402,6 +438,7 @@ class AutoFallbackService : Service() {
                 else
                     sms.sendMultipartTextMessage(destination, null, parts, sent, delivered)
             } catch (e: Exception) {
+                DiagnosticLog.record(this, "SMS request failed for recipient ${recipientIndex + 1}: ${e.javaClass.simpleName}: ${e.message}")
                 val old = p.getString("batch_errors", "").orEmpty()
                 val done = p.getInt("sent_done", 0) + parts.size
                 p.edit().putInt("sent_done", done)

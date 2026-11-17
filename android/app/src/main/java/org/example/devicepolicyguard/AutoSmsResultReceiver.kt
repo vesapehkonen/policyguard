@@ -31,6 +31,7 @@ class AutoSmsResultReceiver : BroadcastReceiver() {
             }
             "${if (sent) "Send" else "Delivery"} $index: $reason; "
         } else ""
+        DiagnosticLog.record(context, "Automatic SMS ${if (sent) "carrier send" else "delivery"} part $index: ${if (failure) errorText.trim() else "success"}")
         val errors = p.getString("batch_errors", "").orEmpty() + errorText
         val editor = p.edit().putStringSet(key, seen).putInt(doneKey, done).putInt(failKey, failures)
             .putString("batch_errors", errors)

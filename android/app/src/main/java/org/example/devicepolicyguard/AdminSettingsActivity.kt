@@ -238,6 +238,8 @@ class AdminSettingsActivity : Activity() {
             else {
                 val saved = FamilyConfig.prefs(this).edit().putBoolean("enabled", false).commit()
                 if (saved) {
+                    FallbackWatchdogReceiver.cancel(this)
+                    FamilyConfig.prefs(this).edit().remove("offline_since_wall").apply()
                     stopService(Intent(this, AutoFallbackService::class.java))
                     EventLog.record(this, "Automatic SMS disabled")
                     message.text = "Automatic SMS fallback disabled"
