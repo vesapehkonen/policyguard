@@ -1,3 +1,5 @@
+Run these commands from android/ (cd android from the repository root).
+
 1. Updating version numbers
   Update version numbers to ./app/build.gradle.kts
     versionCode = 

@@ -1,9 +1,9 @@
-.gradle/
-.kotlin/
+android/.gradle/
+android/.kotlin/
 .idea/
-build/
-app/build/
-local.properties
+android/build/
+android/app/build/
+android/local.properties
 *.iml
 *.apk
 *.aab
@@ -11,8 +11,8 @@ local.properties
 *.hprof
 
 # Local development and generated enrollment artifacts
-provisioning.json
-provisioning-qr.png
+android/provisioning.json
+android/provisioning-qr.png
 __pycache__/
 venv/
 .venv/
